@@ -1,0 +1,106 @@
+---
+- name: Install and Configure HashiCorp Vault and Vault UI
+  hosts: vault
+  become: true
+  tasks:
+    - name: Install Required Packages
+      ansible.builtin.dnf:
+        name:
+          - unzip
+          - wget
+          - dnf-plugins-core
+        state: present
+
+    - name: Add HashiCorp Repository
+      ansible.builtin.get_url:
+        url: https://rpm.releases.hashicorp.com/fedora/hashicorp.repo
+        dest: /etc/yum.repos.d/hashicorp.repo
+        mode: '0644'
+      notify:
+        - Install Vault
+
+    - name: Install Vault
+      ansible.builtin.dnf:
+        name: vault
+        state: present
+
+    - name: Create Vault User and Group
+      ansible.builtin.user:
+        name: vault
+        system: true
+        create_home: no
+        state: present
+      tags:
+        - vault
+
+    - name:
+      ansible.builtin.group:
+        name: vault
+        system: true
+        state: present
+      tags:
+        - vault    
+
+    - name: Create Vault configuration directory
+      ansible.builtin.file:
+        path: /etc/vault.d
+        state: directory
+        mode: '0755'
+
+    - name: Create Vault Data directory
+      ansible.builtin.file:
+        path: /var/lib/vault/data
+        state: directory
+        owner: vault
+        group: vault
+        mode: '0755'
+
+    - name: Create Vault configuration file with UI enabled
+      ansible.builtin.copy:
+        dest: /etc/vault.d/vault.hcl
+        content: |
+          storage "file" {
+            path = "/var/lib/vault/data"
+          }
+          listener "tcp" {
+            address = "0.0.0.0:8200"
+            tls_disable = 1
+          }
+          api_addr = "http://127.0.0.1:8200"
+          ui = true
+          cluster_addr = "http://127.0.0.1:8201"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Create a systemd service file for vault
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/vault.service
+        content: |
+          [Unit]
+          Description=HashiCorp Vault
+          Documentation=https://www.vaultproject.io/docs/
+          After=network-online.target
+
+          [Service]
+          User=vault
+          Group=vault
+          ExecStart=/usr/bin/vault server -config=/etc/vault.d/vault.hcl
+          Restart=on-failure
+          LimitNOFILE=65536
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Reload Systemd and Start Vault
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Status of Vault service
+      ansible.builtin.systemd:
+        name: vault
+        state: started
+        enabled: true
